@@ -458,7 +458,7 @@ def run_one_task():
         print(message)
         update_message(star_id, dataset_id, message)
     else:
-        message = f"clocks.run_one_task(): ---------> Found {len(oms)} clocks in {star_id}"
+        message = f"clocks.run_one_task(): ---------> Found {len(oms)} clocks in {star_id} ({vals[0]:0.1e}, {optvals[0]:0.1e})"
         print(message)
         update_message(star_id, dataset_id, message)
         output_clocks_to_db(star_id, dataset_id, oms, Ms, vals, optvals)
