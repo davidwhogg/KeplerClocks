@@ -2,9 +2,9 @@
 -- FLUSH PRIVILEGES;
 -- CREATE USER 'nana'@'%';
 
--- CREATE DATABASE IF NOT EXISTS stars_db;
--- USE stars_db;
--- GRANT ALL ON stars_db.* TO 'nana'@'%';
+-- CREATE DATABASE IF NOT EXISTS clocks_db;
+-- USE clocks_db;
+-- GRANT ALL ON clocks_db.* TO 'nana'@'%';
 
 
 DROP TABLE IF EXISTS dataset;
