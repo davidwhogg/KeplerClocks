@@ -36,6 +36,7 @@ import sqlite3 as db
 import os
 import sys
 
+CLOCKS_DB_FILE = "../data/clocks.db"
 f_avoid = 3.5 / 372.5 #magic number
 lc_exptime = (29.4) / (60 * 24) #days, see Kepler Data Processing Handbook, Section 3.1
 sc_exptime = (58.8) / (60 * 60 * 24) #days, see Kepler Data Processing Handbook, Section 3.1
@@ -1403,10 +1404,10 @@ def find_modes_in_star(kicID, plots = False, save = False, inject_rng = None, in
 
 '''database setup commands'''
 def setup_db():
-    """
-    ## WARNING: 
-    before you run this command you have to have created the db with the sql file called `../sql/clocks_db_schema.sql`
-    """
+    with db.connect(CLOCKS_DB_FILE, timeout=120.0) as conn:
+        with open("../sql/clocks_db_schema.sql", "r") as sql_file:
+            sql_script = sql_file.read()
+        conn.cursor().executescript(sql_script)
     load_star_table()
     load_dataset_table()
     load_task_table()
@@ -1436,7 +1437,7 @@ def execute_query_and_close(query, retries = 5):
             raise
     
 def load_star_table():
-    filename = "KICids.csv"
+    filename = "../data/KICids.csv"
     foo = Table.read(filename, format = "ascii.csv")
     kic_ids = [f"KIC{f:09d}" for f in foo['ID']]
     query = "DELETE FROM star;"
