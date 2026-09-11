@@ -16,6 +16,7 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Ought to remove some fiducial BJD for numerical stability.
 - Inconsistent naming of theoretical, optimistic, empirical.
 - The main analysis code should return an astropy Table, not a list of arrays.
+- The tolerance on resonance identification should be based on deltaf, not just vibez.
 
 ##calling sequence
 - `python clocks.py schema` #creates the database schema
