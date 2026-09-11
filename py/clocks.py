@@ -221,7 +221,7 @@ def identify_resonances(fs, tol=1.e-4, max_denominator=12):
                 frac_ij = Fraction(ratio_ij).limit_denominator(max_denominator)
                 test_ij = abs((ratio_ij - float(frac_ij)) / ratio_ij) < tol
                 duplicates[j] = test_ji | test_ij
-                print("identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
+                print("clocks.identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
     return duplicates
 
 def best_clocks_in_star(kicid, Mmax=128, plot=True):
