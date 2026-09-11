@@ -43,8 +43,8 @@ DROP TABLE IF EXISTS clock;
 CREATE TABLE clock (
     -- mode_id INT NOT NULL AUTO_INCREMENT PRIMARY KEY, 
     clock_id INTEGER PRIMARY KEY AUTOINCREMENT,
-    omega DOUBLE NOT NULL,
-    degree INTEGER NOT NULL,
+    angular_frequency DOUBLE NOT NULL,
+    fourier_series_degree INTEGER NOT NULL,
     star_id VARCHAR(32) NOT NULL,
     dataset_id VARCHAR(32) NOT NULL,
     empirical_value DOUBLE,
