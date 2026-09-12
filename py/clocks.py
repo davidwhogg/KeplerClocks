@@ -47,8 +47,7 @@ import sys
 # set constants
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
-MIN_EMPIRICAL_VALUE = 1.e6 # inverse days squared
-MIN_THEORETICAL_VALUE = 1.e8 # inverse days squared
+MIN_THEORETICAL_VALUE = 1.e9 # inverse days squared
 
 def get_kepler_data(kic_id, exptime='long'):
     
@@ -245,7 +244,7 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     optimistic_values = np.array([optimistic_clock_value(om, ts, ys, ivars, M) for om, M in zip(oms, Ms)])
 
     # now filter and arrange the clocks
-    good = (values > MIN_EMPIRICAL_VALUE) | (optimistic_values > MIN_THEORETICAL_VALUE)
+    good = (optimistic_values > MIN_THEORETICAL_VALUE)
     if np.sum(good) < 1:
         return [], [], [], []
     oms, values, Ms, optimistic_values = oms[good], values[good], Ms[good], optimistic_values[good]
