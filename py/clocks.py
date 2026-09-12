@@ -442,7 +442,7 @@ def restart_failed_tasks():
         SET started = NULL,
         process_id = NULL
         WHERE finished IS NULL
-        AND started < "{Time(Time.now() - TimeDelta(60, format = "sec"), format = "isot")}"; 
+        AND started < "{Time(Time.now() - TimeDelta(600, format = "sec"), format = "isot")}"; 
         """
     execute_query_and_close(query)
 
