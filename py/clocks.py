@@ -13,7 +13,6 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
 - There is time and Time. Let's drop the astropy one.
 - Ought to subtract some fiducial BJD for numerical stability.
-- The tolerance on resonance identification should be based on deltaf, not just vibez.
 
 ## calling sequence
 - `python clocks.py db` #creates the database and fills the task table
@@ -219,16 +218,23 @@ def get_best_clock(om0, t, y, iv, Mmax, df, dt):
     om = jnp.roots(jnp.polyder(foo), strip_zeros=False).real
     return om[0], jnp.exp(jnp.polyval(foo, om))[0], M
 
-def identify_resonances(fs, tol=1.e-4, max_denominator=12):
+def identify_resonances(fs, fres, max_denominator=12):
     """
-    # bug:
+    ## inputs:
+    - `fs`: list of frequencies, ordered from most important to least.
+    - `fres`: expected frequency resolution (like 1 / [total time] or something like that)
+
+    ## notes:
+    - This can be run on angular frequencies or frequencies. Just make sure that `fs` and `fres` have the same units!
+    
+    ## bugs:
     - REQUIRES that the `fs` be ordered from highest value to lowest.
-    - Lots of MAGIC.
     """
     duplicates = np.zeros_like(fs).astype(bool)
     for i, f in enumerate(fs):
         if not duplicates[i]:
             for j in range(i + 1, len(fs)):
+                tol = fres / min(fs[i], fs[j])
                 ratio_ji = fs[j] / fs[i]
                 frac_ji = Fraction(ratio_ji).limit_denominator(max_denominator)
                 test_ji = abs((ratio_ji - float(frac_ji)) / ratio_ji) < tol
@@ -236,7 +242,7 @@ def identify_resonances(fs, tol=1.e-4, max_denominator=12):
                 frac_ij = Fraction(ratio_ij).limit_denominator(max_denominator)
                 test_ij = abs((ratio_ij - float(frac_ij)) / ratio_ij) < tol
                 duplicates[j] = test_ji | test_ij
-                print("clocks.identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
+                print("identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
     return duplicates
 
 def best_clocks_in_star(kicid, Mmax=128, plot=True):
@@ -272,7 +278,7 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     clocks = clocks[good]
     idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
     clocks = clocks[idx_sort]
-    idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency']))
+    idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency'], np.pi * deltaf))
     clocks = clocks[idx_unique]
     good = (clocks['angular_frequency'] < (0.9999 * np.pi / deltat)) # magic nyquist?
     if np.sum(good) < 1:
