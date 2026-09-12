@@ -71,7 +71,7 @@ def get_kepler_data(kic_id, exptime='long'):
     try:
         search_result = lk.search_lightcurve(kic_id, mission = 'Kepler', exptime=exptime)
         if len(search_result) < 1:
-            msg = f"clocks.get_kepler_data(): no results for {kic_id} at this cadence"
+            msg = f"clocks.get_kepler_data: no results for {kic_id} at this cadence"
             print(msg)
             update_error_message(kic_id, 'Kepler_long', msg)
             return None
@@ -106,7 +106,7 @@ def get_kepler_data(kic_id, exptime='long'):
     good = np.isfinite(times) & np.isfinite(fluxes) & np.isfinite(errors)
     times, fluxes, errors = times[good], fluxes[good], errors[good]
     if len(times) < MIN_NUMBER_OF_KEPLER_MEASUREMENTS:
-        msg = f"clocks.get_kepler_data(): not enough data from Kepler on {kic_id} at this cadence"
+        msg = f"clocks.get_kepler_data: not enough data from Kepler on {kic_id} at this cadence"
         print(msg)
         update_error_message(kic_id, 'Kepler_long', msg)
         return None
@@ -244,7 +244,7 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     foo = get_kepler_data(kicid)
     if foo is None:
         print(f"clocks.best_clocks_in_star(): skipping {kicid}")
-        return [], [], [], []
+        return None
     ts, ys, errs, deltaf, deltat = foo
     ivars = 1. / errs ** 2
     print(f"clocks.best_clocks_in_star(): getting candidate frequencies for {kicid}")
@@ -272,7 +272,7 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     clocks = clocks[good]
     idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
     clocks = clocks[idx_sort]
-    idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency']))
+    idx_unique = np.where(np.logical_not(identify_resonances(clocks['angular_frequency'])))
     clocks = clocks[idx_unique]
     return clocks
 
@@ -480,7 +480,7 @@ def run_one_task():
         print(message)
         update_message(star_id, dataset_id, message)
     else:
-        message = f"clocks.run_one_task(): ---------> Found {len(clocks)} clocks in {star_id} with {clocks['theoretical_value'][0]:0.1e}"
+        message = f"clocks.run_one_task(): ---------> Found {len(clocks)} clocks in {star_id} with {(clocks['theoretical_value'])[0]:0.1e}"
         print(message)
         update_message(star_id, dataset_id, message)
         output_clocks_to_db(star_id, dataset_id, clocks)
@@ -501,7 +501,7 @@ def main():
 
     if len(sys.argv) > 1 and sys.argv[1] == "cleanup":
         restart_failed_tasks()
-        print("clocks.main(): Failed tasks restarted.") 
+        print("clocks.main(): Restarted all dead tasks.") 
         return
 
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
