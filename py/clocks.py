@@ -10,16 +10,12 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Copyright 2026 the authors. This code is licensed for re-use under the *MIT License*.
 
 ## bugs and issues and to-do items:
-- Not yet written -- key code needs to be copied over from nanamiller and davidwhogg repos on GitHub.
-- KICid should be a string not an int! Is it ever an int??
+- This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
 - There is time and Time. Let's drop the astropy one.
-- Ought to remove some fiducial BJD for numerical stability.
-- Inconsistent naming of theoretical, optimistic, empirical.
-- The main analysis code should return an astropy Table, not a list of arrays.
+- Ought to subtract some fiducial BJD for numerical stability.
 - The tolerance on resonance identification should be based on deltaf, not just vibez.
 
-##calling sequence
-- `python clocks.py schema` #creates the database schema
+## calling sequence
 - `python clocks.py db` #creates the database and fills the task table
 - `nohup python clocks.py worker > q.log 2>&1 &` #runs a worker in the background
 """
@@ -45,6 +41,7 @@ import os
 import sys
 
 # set constants
+MIN_NUMBER_OF_KEPLER_MEASUREMENTS = 10_000
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
 MIN_THEORETICAL_VALUE = 1.e9 # inverse days squared
@@ -104,17 +101,23 @@ def get_kepler_data(kic_id, exptime='long'):
         update_error_message(kic_id, 'Kepler_long', str(e))
         return None
         
-    # unpack, remove bad data, and reorder
+    # unpack, remove bad data
     times, fluxes, errors = lc.time.value, lc.flux.value, lc.flux_err.value
     good = np.isfinite(times) & np.isfinite(fluxes) & np.isfinite(errors)
     times, fluxes, errors = times[good], fluxes[good], errors[good]
+    if len(times) < MIN_NUMBER_OF_KEPLER_MEASUREMENTS:
+        msg = f"clocks.get_kepler_data(): not enough data from Kepler on {kic_id} at this cadence"
+        print(msg)
+        update_error_message(kic_id, 'Kepler_long', msg)
+        return None
+
+    # reorder
     idx = np.argsort(times)
     times, fluxes, errors = times[idx], fluxes[idx], errors[idx]
-
     delta_f = (1/(times[-1] - times[0]))
     sampling_time= np.median(np.diff(times))
-    print("clocks.get_kepler_data() took", time.time() - start, "s")
 
+    print("clocks.get_kepler_data() took", time.time() - start, "s")
     return times, fluxes, errors, delta_f, sampling_time
 
 def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
@@ -170,10 +173,22 @@ def clock_value(om, t, y, iv, M):
 
 clock_values = jax.vmap(clock_value, in_axes=(0, None, None, None, None))
 
-@partial(jax.jit, static_argnums=4)
 def optimistic_clock_value(om, t, y, iv, M):
     _, m, pars = fourier_wls_fit(om, t, y, iv, M)
     return np.sum(iv) * om ** 2 * jnp.sum(m ** 2 * pars ** 2)
+
+def take_derivative_wrt_phase(ps, ms):
+    M = (len(ms) - 1) // 2
+    newps = np.zeros_like(ps)
+    newps[1 : M + 1] = ms[M + 1 :] * ps[M + 1 :]
+    newps[M + 1 :] = -1. * ms[1 : M + 1] * ps[1 : M + 1]
+    return newps
+
+def theoretical_clock_value(om, t, y, iv, M):
+    X, m, pars = fourier_wls_fit(om, t, y, iv, M)
+    dpars = take_derivative_wrt_phase(pars, m)
+    derivs = X @ dpars
+    return om ** 2 * np.sum(iv * derivs ** 2)
 
 def get_best_clock(om0, t, y, iv, Mmax, df, dt):
     """
@@ -240,19 +255,26 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     Ms = np.zeros_like(candidate_oms).astype(int)
     print(f"clocks.best_clocks_in_star(): getting clock values for {kicid}")
     for i, om0 in enumerate(candidate_oms):
+        # BUG: Should be a map
         oms[i], values[i], Ms[i] = get_best_clock(om0, ts, ys, ivars, Mmax, deltaf, deltat)
-    optimistic_values = np.array([optimistic_clock_value(om, ts, ys, ivars, M) for om, M in zip(oms, Ms)])
+
+    # now build and populate an astropy table
+    clocks = Table([oms, Ms, values], names=('angular_frequency', 'fourier_series_degree', 'empirical_value'))
+    clocks['optimistic_value'] = np.array([optimistic_clock_value(om, ts, ys, ivars, M)
+                                           for om, M in zip(oms, Ms)])
+    clocks['theoretical_value'] = np.array([theoretical_clock_value(om, ts, ys, ivars, M)
+                                            for om, M in zip(oms, Ms)])
 
     # now filter and arrange the clocks
-    good = (optimistic_values > MIN_THEORETICAL_VALUE)
+    good = (clocks['theoretical_value'] > MIN_THEORETICAL_VALUE)
     if np.sum(good) < 1:
-        return [], [], [], []
-    oms, values, Ms, optimistic_values = oms[good], values[good], Ms[good], optimistic_values[good]
-    idx_sort = np.argsort(values)[::-1]
-    oms, values, Ms, optimistic_values = oms[idx_sort], values[idx_sort], Ms[idx_sort], optimistic_values[idx_sort]
-    idx_remove = np.logical_not(identify_resonances(oms))
-    oms, values, Ms, optimistic_values = oms[idx_remove], values[idx_remove], Ms[idx_remove], optimistic_values[idx_remove]
-    return oms, values, optimistic_values, Ms
+        return None
+    clocks = clocks[good]
+    idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
+    clocks = clocks[idx_sort]
+    idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency']))
+    clocks = clocks[idx_unique]
+    return clocks
 
 '''database setup commands'''
 def setup_db():
@@ -394,7 +416,7 @@ def start_one_task():
         conn.close()
         raise
 
-def output_clocks_to_db(star_id, dataset_id, oms, Ms, vals, optvals):
+def output_clocks_to_db(star_id, dataset_id, clocks):
     """
     ## bugs:
     - This should take in a table, not a list of columns.
@@ -402,11 +424,12 @@ def output_clocks_to_db(star_id, dataset_id, oms, Ms, vals, optvals):
     """
     conn = get_db_connection()
     cursor = conn.cursor()
-    for om, M, val, optval in zip(oms, Ms, vals, optvals):
+    for row in clocks:
         query = f"""
             INSERT INTO clock (star_id, dataset_id, angular_frequency, fourier_series_degree,
                                empirical_value, theoretical_value)
-            VALUES ('{star_id}', '{dataset_id}', {om}, {M}, {val}, {optval});
+            VALUES ('{star_id}', '{dataset_id}', {row['angular_frequency']}, {row['fourier_series_degree']},
+                    {row['empirical_value']}, {row['theoretical_value']});
         """
         cursor.execute(query)
     conn.commit()
@@ -450,17 +473,17 @@ def run_one_task():
     dataset_id = "Kepler_long"  #keep it lc for now
     print(f"clocks.run_one_task() selected star_id={star_id}, dataset_id={dataset_id}")
     
-    oms, vals, optvals, Ms = best_clocks_in_star(star_id)
+    clocks = best_clocks_in_star(star_id)
 
-    if len(oms) < 1:
+    if clocks is None:
         message = f"clocks.run_one_task(): No valid clocks found in {star_id}"
         print(message)
         update_message(star_id, dataset_id, message)
     else:
-        message = f"clocks.run_one_task(): ---------> Found {len(oms)} clocks in {star_id} ({vals[0]:0.1e}, {optvals[0]:0.1e})"
+        message = f"clocks.run_one_task(): ---------> Found {len(clocks)} clocks in {star_id} with {clocks['theoretical_value'][0]:0.1e}"
         print(message)
         update_message(star_id, dataset_id, message)
-        output_clocks_to_db(star_id, dataset_id, oms, Ms, vals, optvals)
+        output_clocks_to_db(star_id, dataset_id, clocks)
 
     end_one_task(star_id, dataset_id)
 
