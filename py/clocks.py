@@ -270,9 +270,13 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     if np.sum(good) < 1:
         return None
     clocks = clocks[good]
+    good = (clocks['angular_frequency'] < (0.9999 * np.pi / deltat)) # magic nyquist?
+    if np.sum(good) < 1:
+        return None
+    clocks = clocks[good]
     idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
     clocks = clocks[idx_sort]
-    idx_unique = np.where(np.logical_not(identify_resonances(clocks['angular_frequency'])))
+    idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency']))
     clocks = clocks[idx_unique]
     return clocks
 
