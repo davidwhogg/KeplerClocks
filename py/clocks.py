@@ -10,6 +10,7 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Copyright 2026 the authors. This code is licensed for re-use under the *MIT License*.
 
 ## bugs and issues and to-do items:
+- Needs a function "do KICID" that just clears the data on KICID and runs it.
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
 - There is time and Time. Let's drop the astropy one.
 - Ought to subtract some fiducial BJD for numerical stability.
@@ -405,21 +406,21 @@ def start_one_task():
             conn.close()
             print("clocks.start_one_task(): No unstarted tasks available.")
             sys.exit(0)
-            
+
         star_id, dataset_id = foo[0]
-        
+
         query2 = f"""UPDATE task SET 
         started = "{Time(Time.now(), format = "isot")}", 
         process_id = {os.getpid()} 
         WHERE star_id = "{star_id}" AND dataset_id = "{dataset_id}";"""
         cursor.execute(query2)
-        
+
         conn.commit()
         cursor.close()
         conn.close()
         print(f"clocks.start_one_task() selected star_id={star_id}, dataset_id={dataset_id}")
         return star_id, dataset_id
-        
+
     except Exception as e:
         conn.rollback()
         cursor.close()
@@ -448,8 +449,7 @@ def output_clocks_to_db(star_id, dataset_id, clocks):
 
 def end_one_task(star_id, dataset_id):
     ##change this for when there is an error message
-    #if error message is not null then do not set finished
-    
+    #if error message is not null then do not set finished    
     query = f"""UPDATE task SET 
     finished = "{Time(Time.now(), format = "isot")}" 
     WHERE star_id = "{star_id}" AND dataset_id = "{dataset_id}";"""
@@ -481,10 +481,7 @@ def restart_failed_tasks():
 def run_one_task():
     star_id, dataset_id = start_one_task()
     dataset_id = "Kepler_long"  #keep it lc for now
-    print(f"clocks.run_one_task() selected star_id={star_id}, dataset_id={dataset_id}")
-    
     clocks = best_clocks_in_star(star_id)
-
     if clocks is None:
         message = f"clocks.run_one_task(): No valid clocks found in {star_id}"
         print(message)
@@ -494,7 +491,6 @@ def run_one_task():
         print(message)
         update_message(star_id, dataset_id, message)
         output_clocks_to_db(star_id, dataset_id, clocks)
-
     end_one_task(star_id, dataset_id)
 
 def main():
