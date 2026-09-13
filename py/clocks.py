@@ -10,7 +10,8 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Copyright 2026 the authors. This code is licensed for re-use under the *MIT License*.
 
 ## bugs and issues and to-do items:
-- Needs a function "do KICID" that just clears the data on KICID and runs it.
+- Needs a function "do KICID" that just clears the data on a single KICID and runs it.
+- Some nomenclature is bad about star vs light curve. KICID is a star, KICID + long is a light curve?
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
 - There is time and Time. Let's drop the astropy one.
 - Ought to subtract some fiducial BJD for numerical stability.
@@ -45,6 +46,7 @@ MIN_NUMBER_OF_KEPLER_MEASUREMENTS = 10_000
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
 MIN_THEORETICAL_VALUE = 1.e9 # inverse days squared
+MAX_INTRASTAR_VALUE_RATIO = 1.e3
 
 def get_kepler_data(kic_id, exptime='long'):
     
@@ -138,8 +140,8 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
         idxs = idxs[:max_peaks]
     return fs[idxs]
 
-@partial(jax.jit, static_argnums=2)
-def design_matrix(om, t, M):
+@partial(jax.jit, static_argnums=1)
+def design_matrix(om, M, t,):
     """
     bug: Doesn't use finufft?
     """
@@ -148,14 +150,14 @@ def design_matrix(om, t, M):
                        jnp.sin(ms2[None, :] * om * t[:, None])), axis=1), \
            jnp.concat((ms1, ms2))
 
-@partial(jax.jit, static_argnums=4)
-def fourier_wls_fit(om, t, y, iv, M):
-    X, m = design_matrix(om, t, M)
+@partial(jax.jit, static_argnums=1)
+def fourier_wls_fit(om, M, t, y, iv):
+    X, m = design_matrix(om, M, t)
     return X, m, jnp.linalg.solve(X.T @ (iv[:, None] * X),
                                   X.T @ (iv * y))
 
-@partial(jax.jit, static_argnums=4)
-def clock_value(om, t, y, iv, M):
+@partial(jax.jit, static_argnums=1)
+def clock_value(om, M, t, y, iv):
     """
     # inputs:
     - `om`: frequency to test
@@ -167,14 +169,14 @@ def clock_value(om, t, y, iv, M):
     - Maybe we should use IRLS to do the fit.
     - Maybe we should penalize (or increase) MSE according to model complexity `2 * M + 1`.
     """
-    X, m, pars = fourier_wls_fit(om, t, y, iv, M)
+    X, m, pars = fourier_wls_fit(om, M, t, y, iv)
     mse = jnp.sum(iv * (y - X @ pars) ** 2) / jnp.sum(iv) # weighted mean
     return len(y) * (om ** 2 / mse) * jnp.sum(m ** 2 * pars ** 2)
 
 clock_values = jax.vmap(clock_value, in_axes=(0, None, None, None, None))
 
-def optimistic_clock_value(om, t, y, iv, M):
-    _, m, pars = fourier_wls_fit(om, t, y, iv, M)
+def optimistic_clock_value(om, M, t, y, iv):
+    _, m, pars = fourier_wls_fit(om, M, t, y, iv)
     return np.sum(iv) * om ** 2 * jnp.sum(m ** 2 * pars ** 2)
 
 def take_derivative_wrt_phase(ps, ms):
@@ -184,13 +186,13 @@ def take_derivative_wrt_phase(ps, ms):
     newps[M + 1 :] = -1. * ms[1 : M + 1] * ps[1 : M + 1]
     return newps
 
-def theoretical_clock_value(om, t, y, iv, M):
-    X, m, pars = fourier_wls_fit(om, t, y, iv, M)
+def theoretical_clock_value(om, M, t, y, iv):
+    X, m, pars = fourier_wls_fit(om, M, t, y, iv)
     dpars = take_derivative_wrt_phase(pars, m)
     derivs = X @ dpars
     return om ** 2 * np.sum(iv * derivs ** 2)
 
-def get_best_clock(om0, t, y, iv, Mmax, df, dt):
+def get_best_clock(om0, Mmax, t, y, iv, df, dt):
     """
     # inputs:
     - `om0`: first guess at a good clock (angular) frequency omega
@@ -211,13 +213,13 @@ def get_best_clock(om0, t, y, iv, Mmax, df, dt):
     M = max(1, min(Mmax, int(nyquist // om0)))
     do = 0.05 * np.pi * df # magic 0.05
     oms = np.array([om0 - do, om0, om0 + do])
-    ys = np.log(clock_values(oms, t, y, iv, M))
+    ys = np.log(clock_values(oms, M, t, y, iv))
     if np.argmax(ys) != 1:
-        return get_best_clock(oms[np.argmax(ys)], t, y, iv, M, df, dt)
+        return get_best_clock(oms[np.argmax(ys)], M, t, y, iv, df, dt)
     ii = jnp.argmax(ys)
     foo = jnp.polyfit(oms, ys, 2)
     om = jnp.roots(jnp.polyder(foo), strip_zeros=False).real
-    return om[0], jnp.exp(jnp.polyval(foo, om))[0], M
+    return om[0], M, jnp.exp(jnp.polyval(foo, om))[0]
 
 def identify_resonances(fs, fres, max_denominator=12):
     """
@@ -263,13 +265,13 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     print(f"clocks.best_clocks_in_star(): getting clock values for {kicid}")
     for i, om0 in enumerate(candidate_oms):
         # BUG: Should be a map
-        oms[i], values[i], Ms[i] = get_best_clock(om0, ts, ys, ivars, Mmax, deltaf, deltat)
+        oms[i], Ms[i], values[i] = get_best_clock(om0, Mmax, ts, ys, ivars, deltaf, deltat)
 
     # now build and populate an astropy table
     clocks = Table([oms, Ms, values], names=('angular_frequency', 'fourier_series_degree', 'empirical_value'))
-    clocks['optimistic_value'] = np.array([optimistic_clock_value(om, ts, ys, ivars, M)
+    clocks['optimistic_value'] = np.array([optimistic_clock_value(om, M, ts, ys, ivars,)
                                            for om, M in zip(oms, Ms)])
-    clocks['theoretical_value'] = np.array([theoretical_clock_value(om, ts, ys, ivars, M)
+    clocks['theoretical_value'] = np.array([theoretical_clock_value(om, M, ts, ys, ivars)
                                             for om, M in zip(oms, Ms)])
 
     # now filter and arrange the clocks
@@ -279,6 +281,8 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     clocks = clocks[good]
     idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
     clocks = clocks[idx_sort]
+    good = (clocks['theoretical_value'] > (np.max(clocks['theoretical_value']) / MAX_INTRASTAR_VALUE_RATIO))
+    clocks = clocks[good]
     idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency'], np.pi * deltaf))
     clocks = clocks[idx_unique]
     good = (clocks['angular_frequency'] < (0.9999 * np.pi / deltat)) # magic nyquist?
