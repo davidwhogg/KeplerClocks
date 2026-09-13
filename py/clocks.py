@@ -44,7 +44,7 @@ import os
 import sys
 
 # set constants
-MAX_NUMBER_OF_STARS = 500 # for testing! raise this to 300_000 for production
+MAX_NUMBER_OF_STARS = 1_000 # for testing! raise this to 300_000 for production
 MIN_NUMBER_OF_MEASUREMENTS = 10_000
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
