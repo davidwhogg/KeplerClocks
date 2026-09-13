@@ -13,10 +13,12 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Needs a function "do KICID" that just clears the data on a single KICID and runs it.
 - Some nomenclature is bad about star vs light curve. KICID is a star, KICID + long is a light curve?
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
-- There is time and Time. Let's drop the astropy one.
 - Ought to subtract some fiducial BJD for numerical stability.
 
-## calling sequence
+## notes:
+- This code doesn't even import matplotlib; plotting must be done elsewhere.
+
+## calling sequence:
 - `python clocks.py db` #creates the database and fills the task table
 - `nohup python clocks.py worker > q.log 2>&1 &` #runs a worker in the background
 """
@@ -42,7 +44,7 @@ import os
 import sys
 
 # set constants
-MIN_NUMBER_OF_KEPLER_MEASUREMENTS = 10_000
+MIN_NUMBER_OF_MEASUREMENTS = 10_000
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
 MIN_THEORETICAL_VALUE = 1.e9 # inverse days squared
@@ -57,17 +59,14 @@ def get_kepler_data(kic_id, exptime='long'):
     `exptime`: default exposure time, 'long'
 
     ## Outputs:
-    Returns a 4-tuple:
-    - `lc`:  Lightkurve lc object (or nan if failed)
-    - `delta_f`: frequency resolution, 1 / total observation time
-    - `sampling_time`: median time between observations (in days)
-    - `exptime`:  exposure time in days (from global `lc_exptime` or `sc_exptime`)
+    Returns a 5-tuple (or `None` if failed):
+    - `times`, `fluxes`, `errors`:  light curve (days, dimensionless, dimensionless)
+    - `delta_f`: frequency resolution, 1 / [total observation time] (inverse days)
+    - `sampling_time`: time resolution [median time between observations] (days)
 
     ## Bugs:
-    - Depends on global vals: `lc_exptime`, `sc_exptime` 
-    - Fails silently when no data found
-    - Rejects light curves where any `dt < 0.9 * median(dt)` — may be too strict
-    - Uses magic thresholds for time sampling
+    - Way too much `try` / `except`.
+    - Dependent on slightly unreliable lightkurve data caching; ought to clear cache on bad objects.
     """
     print("clocks.get_kepler_data(): starting to download data for", kic_id)
     try:
@@ -107,7 +106,7 @@ def get_kepler_data(kic_id, exptime='long'):
     times, fluxes, errors = lc.time.value, lc.flux.value, lc.flux_err.value
     good = np.isfinite(times) & np.isfinite(fluxes) & np.isfinite(errors)
     times, fluxes, errors = times[good], fluxes[good], errors[good]
-    if len(times) < MIN_NUMBER_OF_KEPLER_MEASUREMENTS:
+    if len(times) < MIN_NUMBER_OF_MEASUREMENTS:
         msg = f"clocks.get_kepler_data: not enough data from Kepler on {kic_id} at this cadence"
         print(msg)
         update_error_message(kic_id, 'Kepler_long', msg)
@@ -129,6 +128,9 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
     - `df`, `dt`: the smallest frequency and the smallest time of relevance
 
     # bugs:
+    - The `nterms` input is set without significant testing.
+    - It is not clear that 32 is the right number of max peaks for default.
+    - Should this code multiply by `fs ** 2` before peak-finding? To make it more like a value?
     - MAGIC oversampling by a factor of either 2 or 4 (I don't know which)
     """
     fs = np.arange(1. / MAX_PERIOD, 0.5 / dt, 0.25 * df)
@@ -143,7 +145,7 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
 @partial(jax.jit, static_argnums=1)
 def design_matrix(om, M, t,):
     """
-    bug: Doesn't use finufft?
+    bug: Doesn't use jax-finufft?
     """
     ms1, ms2 = jnp.arange(M + 1), jnp.arange(1, M + 1)
     return jnp.concat((jnp.cos(ms1[None, :] * om * t[:, None]),
@@ -275,14 +277,13 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
                                             for om, M in zip(oms, Ms)])
 
     # now filter and arrange the clocks
-    good = (clocks['theoretical_value'] > MIN_THEORETICAL_VALUE)
+    good = (clocks['theoretical_value'] > MIN_THEORETICAL_VALUE) \
+         & (clocks['theoretical_value'] > (np.max(clocks['theoretical_value']) / MAX_INTRASTAR_VALUE_RATIO))
     if np.sum(good) < 1:
         return None
     clocks = clocks[good]
     idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
     clocks = clocks[idx_sort]
-    good = (clocks['theoretical_value'] > (np.max(clocks['theoretical_value']) / MAX_INTRASTAR_VALUE_RATIO))
-    clocks = clocks[good]
     idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency'], np.pi * deltaf))
     clocks = clocks[idx_unique]
     good = (clocks['angular_frequency'] < (0.9999 * np.pi / deltat)) # magic nyquist?
