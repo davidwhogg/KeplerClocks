@@ -44,6 +44,7 @@ import os
 import sys
 
 # set constants
+MAX_NUMBER_OF_STARS = 500 # for testing! raise this to 300_000 for production
 MIN_NUMBER_OF_MEASUREMENTS = 10_000
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
@@ -325,10 +326,12 @@ def execute_query_and_close(query, retries = 5):
         else:
             print("Max retries reached. Could not execute query.")
             raise
-    
+
 def load_star_table():
     filename = "../data/KICids.csv"
     foo = Table.read(filename, format = "ascii.csv")
+    if len(foo) > MAX_NUMBER_OF_STARS:
+        foo = foo[:MAX_NUMBER_OF_STARS]
     kic_ids = [f"KIC{f:09d}" for f in foo['ID']]
     query = "DELETE FROM star;"
     execute_query_and_close(query)
