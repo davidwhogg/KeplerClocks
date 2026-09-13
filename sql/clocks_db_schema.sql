@@ -1,11 +1,7 @@
--- DROP USER 'nana'@'localhost';
--- FLUSH PRIVILEGES;
--- CREATE USER 'nana'@'%';
-
--- CREATE DATABASE IF NOT EXISTS clocks_db;
--- USE clocks_db;
--- GRANT ALL ON clocks_db.* TO 'nana'@'%';
-
+-- # Schema for the KeplerClocks project
+--
+-- ## bugs:
+-- - needs a VIEW that is called `bestclock` with one clock per star, and a column `best_of`
 
 DROP TABLE IF EXISTS dataset;
 CREATE TABLE IF NOT EXISTS dataset (
