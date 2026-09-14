@@ -525,9 +525,9 @@ def main():
         return
 
     print("Usage:")
-    print("  python clocks.py db        # to setup the database")
+    print("  python clocks.py db        # to setup an empty database (WARNING: CLOBBER)")
     print("  python clocks.py cleanup   # to restart failed tasks")
-    print("  python clocks.py worker    # to run as a worker process")    
+    print("  python clocks.py worker    # to run as a worker process")
     return
 
 if __name__ == "__main__":
