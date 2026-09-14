@@ -1,7 +1,4 @@
 -- # Schema for the KeplerClocks project
---
--- ## bugs:
--- - needs a VIEW that is called `bestclock` with one clock per star, and a column `best_of`
 
 DROP TABLE IF EXISTS dataset;
 CREATE TABLE IF NOT EXISTS dataset (
@@ -48,3 +45,17 @@ CREATE TABLE clock (
     timing_precision_jackknife DOUBLE,
     timing_precision_split DOUBLE
 );
+
+DROP VIEW IF EXISTS best_clock;
+CREATE VIEW best_clock AS
+WITH ranked_clocks AS (
+    SELECT 
+        *,
+        COUNT(*) OVER(PARTITION BY star_id) AS best_of,
+        ROW_NUMBER() OVER(PARTITION BY star_id ORDER BY theoretical_value DESC) AS rn
+    FROM clock
+)
+SELECT 
+    star_id, best_of, angular_frequency, fourier_series_degree, empirical_value, theoretical_value
+FROM ranked_clocks
+WHERE rn = 1;
