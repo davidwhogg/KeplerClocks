@@ -303,8 +303,8 @@ def setup_db():
     load_dataset_table()
     load_task_table()
 
-def get_db_connection():
-    conn = db.connect(CLOCKS_DB_FILE, timeout=120.0)
+def get_db_connection(file=CLOCKS_DB_FILE):
+    conn = db.connect(file, timeout=120.0)
     conn.execute("PRAGMA journal_mode=WAL")
     return conn
 
