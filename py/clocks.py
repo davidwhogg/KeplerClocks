@@ -134,9 +134,9 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
     - Should this code multiply by `fs ** 2` before peak-finding? To make it more like a value?
     - MAGIC oversampling by a factor of either 2 or 4 (I don't know which)
     """
-    fs = np.arange(1. / MAX_PERIOD, 0.5 / dt, 0.25 * df)
+    fs = np.arange(1. / MAX_PERIOD, 0.49999 / dt, 0.25 * df)
     ps = LombScargle(ts, ys, errs, nterms=nterms).power(fs)
-    idxs, _ = find_peaks(ps, distance=4)
+    idxs, _ = find_peaks(fs * fs * ps, distance=4) # frequency squared
     ii = np.argsort(ps[idxs])[::-1]
     idxs = idxs[ii]
     if len(idxs) > max_peaks:
@@ -522,6 +522,7 @@ def main():
         time.sleep(5)
         while(True):
             run_one_task()
+            sys.stdout.flush()
         return
 
     print("Usage:")
