@@ -180,7 +180,7 @@ clock_values = jax.vmap(clock_value, in_axes=(0, None, None, None, None))
 
 def optimistic_clock_value(om, M, t, y, iv):
     _, m, pars = fourier_wls_fit(om, M, t, y, iv)
-    return np.sum(iv) * om ** 2 * jnp.sum(m ** 2 * pars ** 2)
+    return 0.5 * np.sum(iv) * om ** 2 * jnp.sum(m ** 2 * pars ** 2)
 
 def take_derivative_wrt_phase(ps, ms):
     M = (len(ms) - 1) // 2
