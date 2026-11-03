@@ -102,7 +102,7 @@ def get_kepler_data(kic_id, exptime='long'):
         print(f"Exception for {kic_id}: get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
         update_error_message(kic_id, 'Kepler_long', str(e))
         return None
-        
+
     # unpack, remove bad data
     times, fluxes, errors = lc.time.value, lc.flux.value, lc.flux_err.value
     good = np.isfinite(times) & np.isfinite(fluxes) & np.isfinite(errors)
@@ -124,11 +124,14 @@ def get_kepler_data(kic_id, exptime='long'):
 
 def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
     """
-    # inputs:
+    ## inputs:
     - `ts`, `ys`, `errs`: the light curve
     - `df`, `dt`: the smallest frequency and the smallest time of relevance
 
-    # bugs:
+    ## outputs:
+    - `fs`: list of candidate frequencies (usually `max_peaks` of them)
+    
+    ## bugs:
     - The `nterms` input is set without significant testing.
     - It is not clear that 32 is the right number of max peaks for default.
     - Should this code multiply by `fs ** 2` before peak-finding? To make it more like a value?
@@ -146,7 +149,8 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
 @partial(jax.jit, static_argnums=1)
 def design_matrix(om, M, t,):
     """
-    bug: Doesn't use jax-finufft?
+    ## bugs:
+    - Doesn't use jax-finufft?
     """
     ms1, ms2 = jnp.arange(M + 1), jnp.arange(1, M + 1)
     return jnp.concat((jnp.cos(ms1[None, :] * om * t[:, None]),
@@ -160,7 +164,7 @@ def fourier_wls_fit(om, M, t, y, iv):
                                   X.T @ (iv * y))
 
 @partial(jax.jit, static_argnums=1)
-def clock_value(om, M, t, y, iv):
+def empirical_clock_value(om, M, t, y, iv):
     """
     # inputs:
     - `om`: frequency to test
@@ -168,7 +172,7 @@ def clock_value(om, M, t, y, iv):
     - `M`: degree of Fourier series
 
     # bugs:
-    - This is very affected by outliers; need to remove those somehow. But *don't* use `jnp.median()`!
+    - This is a very brutal approximation to be fast for jax.
     - Maybe we should use IRLS to do the fit.
     - Maybe we should penalize (or increase) MSE according to model complexity `2 * M + 1`.
     """
@@ -176,11 +180,7 @@ def clock_value(om, M, t, y, iv):
     mse = jnp.sum(iv * (y - X @ pars) ** 2) / jnp.sum(iv) # weighted mean
     return len(y) * (om ** 2 / mse) * jnp.sum(m ** 2 * pars ** 2)
 
-clock_values = jax.vmap(clock_value, in_axes=(0, None, None, None, None))
-
-def optimistic_clock_value(om, M, t, y, iv):
-    _, m, pars = fourier_wls_fit(om, M, t, y, iv)
-    return 0.5 * np.sum(iv) * om ** 2 * jnp.sum(m ** 2 * pars ** 2)
+clock_values = jax.vmap(empirical_clock_value, in_axes=(0, None, None, None, None))
 
 def take_derivative_wrt_phase(ps, ms):
     M = (len(ms) - 1) // 2
@@ -277,11 +277,12 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False):
     # now build and populate an astropy table
     print(f"clocks.best_clocks_in_star(): building long clock table for {kicid}")
     clocks = Table([oms, Ms, values], names=('angular_frequency', 'fourier_series_degree', 'empirical_value'))
-    clocks['optimistic_value'] = np.array([optimistic_clock_value(om, M, ts, ys, ivars,)
-                                           for om, M in zip(oms, Ms)])
     clocks['theoretical_value'] = np.array([theoretical_clock_value(om, M, ts, ys, ivars)
                                             for om, M in zip(oms, Ms)])
-
+    if verbose:
+        for o, oo, v, vv in zip(oms, clocks['angular_frequency'], values, clocks['theoretical_value']):
+            print(o, oo, v, vv)
+    
     # now filter and arrange the clocks
     print(f"clocks.best_clocks_in_star(): trimming clock table for {kicid}")
     if verbose:
@@ -293,7 +294,9 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False):
     clocks = clocks[good]
     if verbose:
         print(clocks)
-    idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
+
+    # sort by empirical value -- not theoretical value -- before identifying resonances!
+    idx_sort = np.argsort(clocks['empirical_value'])[::-1]
     clocks = clocks[idx_sort]
     idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency'], np.pi * deltaf))
     clocks = clocks[idx_unique]
