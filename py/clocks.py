@@ -251,7 +251,7 @@ def identify_resonances(fs, fres, max_denominator=12):
                 print("identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
     return duplicates
 
-def best_clocks_in_star(kicid, Mmax=128, plot=True):
+def best_clocks_in_star(kicid, Mmax=128, verbose=False):
     print(f"clocks.best_clocks_in_star(): getting Kepler data for {kicid}")
     foo = get_kepler_data(kicid)
     if foo is None:
@@ -261,6 +261,8 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     ivars = 1. / errs ** 2
     print(f"clocks.best_clocks_in_star(): getting candidate frequencies for {kicid}")
     candidate_oms = 2. * np.pi * get_candidate_frequencies(ts, ys, errs, deltaf, deltat)
+    if verbose:
+        print("frequencies:", candidate_oms)
 
     # now loop through candidates and refine them
     oms, values = np.zeros_like(candidate_oms), np.zeros_like(candidate_oms)
@@ -269,8 +271,11 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
     for i, om0 in enumerate(candidate_oms):
         # BUG: Should be a map
         oms[i], Ms[i], values[i] = get_best_clock(om0, Mmax, ts, ys, ivars, deltaf, deltat)
-
+    if verbose:
+        print("clock values:", values)
+        
     # now build and populate an astropy table
+    print(f"clocks.best_clocks_in_star(): building long clock table for {kicid}")
     clocks = Table([oms, Ms, values], names=('angular_frequency', 'fourier_series_degree', 'empirical_value'))
     clocks['optimistic_value'] = np.array([optimistic_clock_value(om, M, ts, ys, ivars,)
                                            for om, M in zip(oms, Ms)])
@@ -278,19 +283,28 @@ def best_clocks_in_star(kicid, Mmax=128, plot=True):
                                             for om, M in zip(oms, Ms)])
 
     # now filter and arrange the clocks
+    print(f"clocks.best_clocks_in_star(): trimming clock table for {kicid}")
+    if verbose:
+        print(clocks)
     good = (clocks['theoretical_value'] > MIN_THEORETICAL_VALUE) \
          & (clocks['theoretical_value'] > (np.max(clocks['theoretical_value']) / MAX_INTRASTAR_VALUE_RATIO))
     if np.sum(good) < 1:
         return None
     clocks = clocks[good]
+    if verbose:
+        print(clocks)
     idx_sort = np.argsort(clocks['theoretical_value'])[::-1]
     clocks = clocks[idx_sort]
     idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency'], np.pi * deltaf))
     clocks = clocks[idx_unique]
+    if verbose:
+        print(clocks)
     good = (clocks['angular_frequency'] < (0.9999 * np.pi / deltat)) # magic nyquist?
     if np.sum(good) < 1:
         return None
     clocks = clocks[good]
+    if verbose:
+        print(clocks)
     return clocks
 
 '''database setup commands'''
