@@ -189,11 +189,15 @@ def take_derivative_wrt_phase(ps, ms):
     newps[M + 1 :] = -1. * ms[1 : M + 1] * ps[1 : M + 1]
     return newps
 
-def theoretical_clock_value(om, M, t, y, iv):
+def theoretical_clock_value_and_bic(om, M, t, y, iv):
+    """
+    frankenstein function that does theoretical value and BIC
+    """
     X, m, pars = fourier_wls_fit(om, M, t, y, iv)
+    chisquared = np.sum(iv * (y - X @ pars) ** 2)
     dpars = take_derivative_wrt_phase(pars, m)
     derivs = X @ dpars
-    return om ** 2 * np.sum(iv * derivs ** 2)
+    return om ** 2 * np.sum(iv * derivs ** 2), chisquared + 2 * (M + 1) * np.log(len(y))
 
 def get_best_clock(om0, Mmax, t, y, iv, df, dt):
     """
@@ -213,7 +217,7 @@ def get_best_clock(om0, Mmax, t, y, iv, df, dt):
     - Works in the log for stability.
     """
     nyquist = np.pi / dt # angular-frequency units
-    M = max(1, min(Mmax, int(nyquist // om0)))
+    M = max(1, min(Mmax, int(nyquist // om0))) + 1 # hack plus 1!!
     do = 0.05 * np.pi * df # magic 0.05
     oms = np.array([om0 - do, om0, om0 + do])
     ys = np.log(clock_values(oms, M, t, y, iv))
@@ -277,12 +281,15 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False):
     # now build and populate an astropy table
     print(f"clocks.best_clocks_in_star(): building long clock table for {kicid}")
     clocks = Table([oms, Ms, values], names=('angular_frequency', 'fourier_series_degree', 'empirical_value'))
-    clocks['theoretical_value'] = np.array([theoretical_clock_value(om, M, ts, ys, ivars)
-                                            for om, M in zip(oms, Ms)])
+    clocks['theoretical_value'] = 0.
+    clocks['BIC'] = 0.
+    for i, (om, M) in enumerate(zip(oms, Ms)):
+        clocks['theoretical_value'][i], clocks['BIC'][i] = \
+            theoretical_clock_value_and_bic(om, M, ts, ys, ivars)
     if verbose:
-        for o, oo, v, vv in zip(oms, clocks['angular_frequency'], values, clocks['theoretical_value']):
-            print(o, oo, v, vv)
-    
+        for o, oo, v, vv, b in zip(oms, clocks['angular_frequency'], values, clocks['theoretical_value'], clocks['BIC']):
+            print(o, oo, v, vv, b)
+
     # now filter and arrange the clocks
     print(f"clocks.best_clocks_in_star(): trimming clock table for {kicid}")
     if verbose:
@@ -295,8 +302,8 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False):
     if verbose:
         print(clocks)
 
-    # sort by empirical value -- not theoretical value -- before identifying resonances!
-    idx_sort = np.argsort(clocks['empirical_value'])[::-1]
+    # sort by BIC --- not theoretical value --- before identifying resonances!
+    idx_sort = np.argsort(clocks['BIC'])
     clocks = clocks[idx_sort]
     idx_unique = np.logical_not(identify_resonances(clocks['angular_frequency'], np.pi * deltaf))
     clocks = clocks[idx_unique]
