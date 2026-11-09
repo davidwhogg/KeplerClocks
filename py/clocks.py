@@ -14,6 +14,7 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Some nomenclature is bad about star vs light curve. KICID is a star, KICID + long is a light curve?
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
 - Ought to subtract some fiducial BJD for numerical stability.
+- Ought to store BIC values in the clock table in the db.
 
 ## notes:
 - This code doesn't even import matplotlib; plotting must be done elsewhere.
@@ -147,7 +148,7 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
     return fs[idxs]
 
 @partial(jax.jit, static_argnums=1)
-def design_matrix(om, M, t,):
+def design_matrix(om, M, t):
     """
     ## bugs:
     - Doesn't use jax-finufft?
@@ -164,7 +165,7 @@ def fourier_wls_fit(om, M, t, y, iv):
                                   X.T @ (iv * y))
 
 @partial(jax.jit, static_argnums=1)
-def empirical_clock_value(om, M, t, y, iv):
+def chi_squared(om, M, t, y, iv):
     """
     # inputs:
     - `om`: frequency to test
@@ -172,15 +173,12 @@ def empirical_clock_value(om, M, t, y, iv):
     - `M`: degree of Fourier series
 
     # bugs:
-    - This is a very brutal approximation to be fast for jax.
     - Maybe we should use IRLS to do the fit.
-    - Maybe we should penalize (or increase) MSE according to model complexity `2 * M + 1`.
     """
     X, m, pars = fourier_wls_fit(om, M, t, y, iv)
-    mse = jnp.sum(iv * (y - X @ pars) ** 2) / jnp.sum(iv) # weighted mean
-    return len(y) * (om ** 2 / mse) * jnp.sum(m ** 2 * pars ** 2)
+    return jnp.sum(iv * (y - X @ pars) ** 2)
 
-clock_values = jax.vmap(empirical_clock_value, in_axes=(0, None, None, None, None))
+chi_squareds = jax.vmap(chi_squared, in_axes=(0, None, None, None, None))
 
 def take_derivative_wrt_phase(ps, ms):
     M = (len(ms) - 1) // 2
@@ -210,23 +208,23 @@ def get_best_clock(om0, Mmax, t, y, iv, df, dt):
 
     # bugs:
     - Takes one input as angular frequency and another as frequency.
-    - MAGIC 0.05
+    - MAGIC `0.05`.
+    - `M - 1 + 1` hack.
+    - Could get stuck in a recursion loop in a very strange edge case.
 
     # notes:
-    - Recursion is insane.
-    - Works in the log for stability.
+    - Recursion is insane and potentially a bug.
     """
     nyquist = np.pi / dt # angular-frequency units
-    M = max(1, min(Mmax, int(nyquist // om0))) + 1 # hack plus 1!!
+    M = max(1, min(Mmax - 1, int(nyquist // om0))) + 1 # hack minus 1, plus 1!
     do = 0.05 * np.pi * df # magic 0.05
     oms = np.array([om0 - do, om0, om0 + do])
-    ys = np.log(clock_values(oms, M, t, y, iv))
-    if np.argmax(ys) != 1:
-        return get_best_clock(oms[np.argmax(ys)], M, t, y, iv, df, dt)
-    ii = jnp.argmax(ys)
-    foo = jnp.polyfit(oms, ys, 2)
+    qs = chi_squareds(oms, M, t, y, iv)
+    if np.argmin(qs) != 1:
+        return get_best_clock(oms[np.argmin(qs)], Mmax, t, y, iv, df, dt)
+    foo = jnp.polyfit(oms, qs, 2)
     om = jnp.roots(jnp.polyder(foo), strip_zeros=False).real
-    return om[0], M, jnp.exp(jnp.polyval(foo, om))[0]
+    return om[0], M, jnp.polyval(foo, om)[0]
 
 def identify_resonances(fs, fres, max_denominator=12):
     """
@@ -269,18 +267,18 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False):
         print("frequencies:", candidate_oms)
 
     # now loop through candidates and refine them
-    oms, values = np.zeros_like(candidate_oms), np.zeros_like(candidate_oms)
+    oms, chi_squareds = np.zeros_like(candidate_oms), np.zeros_like(candidate_oms)
     Ms = np.zeros_like(candidate_oms).astype(int)
-    print(f"clocks.best_clocks_in_star(): getting clock values for {kicid}")
+    print(f"clocks.best_clocks_in_star(): refining clock frequencies for {kicid}")
     for i, om0 in enumerate(candidate_oms):
         # BUG: Should be a map
-        oms[i], Ms[i], values[i] = get_best_clock(om0, Mmax, ts, ys, ivars, deltaf, deltat)
+        oms[i], Ms[i], chi_squareds[i] = get_best_clock(om0, Mmax, ts, ys, ivars, deltaf, deltat)
     if verbose:
-        print("clock values:", values)
-        
+        print("chi-squareds:", chi_squareds)
+
     # now build and populate an astropy table
     print(f"clocks.best_clocks_in_star(): building long clock table for {kicid}")
-    clocks = Table([oms, Ms, values], names=('angular_frequency', 'fourier_series_degree', 'empirical_value'))
+    clocks = Table([oms, Ms, chi_squareds], names=('angular_frequency', 'fourier_series_degree', 'chi_squared'))
     clocks['kicid'] = kicid
     clocks['theoretical_value'] = 0.
     clocks['BIC'] = 0.
@@ -471,9 +469,9 @@ def output_clocks_to_db(star_id, dataset_id, clocks):
     for row in clocks:
         query = f"""
             INSERT INTO clock (star_id, dataset_id, angular_frequency, fourier_series_degree,
-                               empirical_value, theoretical_value)
+                               theoretical_value)
             VALUES ('{star_id}', '{dataset_id}', {row['angular_frequency']}, {row['fourier_series_degree']},
-                    {row['empirical_value']}, {row['theoretical_value']});
+                    {row['theoretical_value']});
         """
         cursor.execute(query)
     conn.commit()
