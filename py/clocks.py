@@ -279,7 +279,7 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False):
     # now build and populate an astropy table
     print(f"clocks.best_clocks_in_star(): building long clock table for {kicid}")
     clocks = Table([oms, Ms, chi_squareds], names=('angular_frequency', 'fourier_series_degree', 'chi_squared'))
-    clocks['kicid'] = kicid
+    clocks['star_id'] = kicid
     clocks['theoretical_value'] = 0.
     clocks['BIC'] = 0.
     for i, (om, M) in enumerate(zip(oms, Ms)):
