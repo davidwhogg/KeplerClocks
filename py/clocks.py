@@ -52,7 +52,7 @@ MAX_PERIOD = 30. # days
 MIN_THEORETICAL_VALUE = 1.e9 # inverse days squared
 MAX_INTRASTAR_VALUE_RATIO = 1.e3
 
-def get_kepler_data(kic_id, exptime='long'):
+def get_kepler_data(kic_id, exptime='long', write_to_db=True):
     
     start = time.time()
     """
@@ -80,28 +80,33 @@ def get_kepler_data(kic_id, exptime='long'):
             return None
     except Exception as e:
         print(f"Exception for {kic_id}: get_kepler_data(): lk.search_lightcurve() failed for {kic_id } with {str(e)}")
-        update_error_message(kic_id, 'Kepler_long', str(e))
+        if write_to_db:
+            update_error_message(kic_id, 'Kepler_long', str(e))
         return None
     try:
         lc_collection = search_result.download_all()
     except lk.LightkurveError as e:
         print(f"LightkurveError for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
-        update_error_message(kic_id, 'Kepler_long', str(e))
+        if write_to_db:
+            update_error_message(kic_id, 'Kepler_long', str(e))
         return None
     except Exception as e:
         print(f"Exception for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
-        update_error_message(kic_id, 'Kepler_long', str(e))
+        if write_to_db:
+            update_error_message(kic_id, 'Kepler_long', str(e))
         return None
     try:
         lc = lc_collection.stitch()
         #print("get_kepler_data(): minimum time value", np.min(lc.time.value), np.min(lc.time), lc.time)
     except lk.LightkurveError as e:
         print(f"LightkurveError for {kic_id}: get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
-        update_error_message(kic_id, 'Kepler_long', str(e))
+        if write_to_db:
+            update_error_message(kic_id, 'Kepler_long', str(e))
         return None
     except Exception as e:
         print(f"Exception for {kic_id}: get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
-        update_error_message(kic_id, 'Kepler_long', str(e))
+        if write_to_db:
+            update_error_message(kic_id, 'Kepler_long', str(e))
         return None
 
     # unpack, remove bad data
@@ -111,7 +116,8 @@ def get_kepler_data(kic_id, exptime='long'):
     if len(times) < MIN_NUMBER_OF_MEASUREMENTS:
         msg = f"clocks.get_kepler_data: not enough data from Kepler on {kic_id} at this cadence"
         print(msg)
-        update_error_message(kic_id, 'Kepler_long', msg)
+        if write_to_db:
+            update_error_message(kic_id, 'Kepler_long', msg)
         return None
 
     # reorder
@@ -253,9 +259,9 @@ def identify_resonances(fs, fres, max_denominator=12):
                 print("identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
     return duplicates
 
-def best_clocks_in_star(kicid, Mmax=128, verbose=False):
+def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
     print(f"clocks.best_clocks_in_star(): getting Kepler data for {kicid}")
-    foo = get_kepler_data(kicid)
+    foo = get_kepler_data(kicid, write_to_db=write_to_db)
     if foo is None:
         print(f"clocks.best_clocks_in_star(): skipping {kicid}")
         return None
