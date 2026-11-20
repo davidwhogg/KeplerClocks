@@ -320,8 +320,8 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
             clocks['jackknife_value'][i], clocks['jackknife_value_shuffled'][i] = \
             clock_statistics(om, M, ts, ys, ivars)
     if verbose:
-        for o, oo, v, vv, b in zip(oms, clocks['angular_frequency'], clocks['theoretical_value'], clocks['BIC']):
-            print(o, oo, v, vv, b)
+        for o, oo, v, b in zip(oms, clocks['angular_frequency'], clocks['theoretical_value'], clocks['BIC']):
+            print(o, oo, v, b)
 
     # now filter and arrange the clocks
     print(f"clocks.best_clocks_in_star(): trimming clock table for {kicid}")
