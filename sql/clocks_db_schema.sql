@@ -40,10 +40,9 @@ CREATE TABLE clock (
     fourier_series_degree INTEGER NOT NULL,
     star_id VARCHAR(32) NOT NULL,
     dataset_id VARCHAR(32) NOT NULL,
-    empirical_value DOUBLE,
     theoretical_value DOUBLE,
-    timing_precision_jackknife DOUBLE,
-    timing_precision_split DOUBLE
+    jackknife_value DOUBLE,
+    jackknife_value_shuffled DOUBLE
 );
 
 DROP VIEW IF EXISTS best_clock;
