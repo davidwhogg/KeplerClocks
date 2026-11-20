@@ -56,6 +56,6 @@ WITH ranked_clocks AS (
     FROM clock
 )
 SELECT 
-    star_id, best_of, angular_frequency, fourier_series_degree, empirical_value, theoretical_value, BIC, jackknife_value, jackknife_value_shuffled
+    star_id, best_of, angular_frequency, fourier_series_degree, theoretical_value, BIC, jackknife_value, jackknife_value_shuffled
 FROM ranked_clocks
 WHERE rn = 1;

@@ -142,11 +142,12 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
     - The `nterms` input is set without significant testing.
     - It is not clear that 32 is the right number of max peaks for default.
     - Should this code multiply by `fs ** 2` before peak-finding? To make it more like a value?
-    - MAGIC oversampling by a factor of either 2 or 4 (I don't know which)
+    - MAGIC oversampling by a factor of either 2 or 4 (I don't know which).
+    - MAGIC 0.2499 because when we made this larger, bad things happened.
     """
-    fs = np.arange(1. / MAX_PERIOD, 0.49999 / dt, 0.25 * df)
+    fs = np.arange(1. / MAX_PERIOD, 0.2499 / dt, 0.25 * df)
     ps = LombScargle(ts, ys, errs, nterms=nterms).power(fs)
-    idxs, _ = find_peaks(fs * fs * ps, distance=4) # frequency squared
+    idxs, _ = find_peaks(ps, distance=4)
     ii = np.argsort(ps[idxs])[::-1]
     idxs = idxs[ii]
     if len(idxs) > max_peaks:
