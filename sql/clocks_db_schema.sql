@@ -41,6 +41,7 @@ CREATE TABLE clock (
     star_id VARCHAR(32) NOT NULL,
     dataset_id VARCHAR(32) NOT NULL,
     theoretical_value DOUBLE,
+    BIC DOUBLE,
     jackknife_value DOUBLE,
     jackknife_value_shuffled DOUBLE
 );

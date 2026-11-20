@@ -193,15 +193,38 @@ def take_derivative_wrt_phase(ps, ms):
     newps[M + 1 :] = -1. * ms[1 : M + 1] * ps[1 : M + 1]
     return newps
 
-def theoretical_clock_value_and_bic(om, M, t, y, iv):
+def jackknife_value(resids, ivars, derivs, njack, shuffle_seed=None):
     """
-    frankenstein function that does theoretical value and BIC
+    ## bugs:
+    - You might not like the way we use the seed, but this is all about reproducibility.
+    """
+    N = len(resids)
+    subsamp = np.arange(N) * njack // N
+    if shuffle_seed is not None:
+        np.random.default_rng(shuffle_seed).shuffle(subsamp)
+    time_shifts = np.zeros(njack)
+    for samp in range(njack):
+        loo = subsamp != samp
+        time_shifts[samp] = np.sum(ivars[loo] * resids[loo] * derivs[loo]) \
+                          / np.sum(ivars[loo] * derivs[loo] * derivs[loo])
+    return ((njack - 1) / njack) * np.sum((time_shifts - np.mean(time_shifts)) ** 2)
+
+def clock_statistics(om, M, t, y, iv, njack=16):
+    """
+    frankenstein function that does theoretical value, BIC, and jackknifes
+    
+    ## output:
+    - theoretical_value, bic, jackknife value, jackknife value (shuffled)
     """
     X, m, pars = fourier_wls_fit(om, M, t, y, iv)
-    chisquared = np.sum(iv * (y - X @ pars) ** 2)
+    resids = y - X @ pars
+    chisquared = np.sum(iv * resids ** 2)
     dpars = take_derivative_wrt_phase(pars, m)
     derivs = X @ dpars
-    return om ** 2 * np.sum(iv * derivs ** 2), chisquared + 2 * (M + 1) * np.log(len(y))
+    return om ** 2 * np.sum(iv * derivs ** 2), \
+        chisquared + len(pars) * np.log(len(y)), \
+        jackknife_value(resids, iv, derivs, njack), \
+        jackknife_value(resids, iv, derivs, njack, shuffle_seed=17)
 
 def get_best_clock(om0, Mmax, t, y, iv, df, dt):
     """
@@ -288,11 +311,14 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
     clocks['star_id'] = kicid
     clocks['theoretical_value'] = 0.
     clocks['BIC'] = 0.
+    clocks['jackknife_value'] = 0.
+    clocks['jackknife_value_shuffled'] = 0.
     for i, (om, M) in enumerate(zip(oms, Ms)):
-        clocks['theoretical_value'][i], clocks['BIC'][i] = \
-            theoretical_clock_value_and_bic(om, M, ts, ys, ivars)
+        clocks['theoretical_value'][i], clocks['BIC'][i], \
+            clocks['jackknife_value'][i], clocks['jackknife_value_shuffled'][i] = \
+            clock_statistics(om, M, ts, ys, ivars)
     if verbose:
-        for o, oo, v, vv, b in zip(oms, clocks['angular_frequency'], values, clocks['theoretical_value'], clocks['BIC']):
+        for o, oo, v, vv, b in zip(oms, clocks['angular_frequency'], clocks['theoretical_value'], clocks['BIC']):
             print(o, oo, v, vv, b)
 
     # now filter and arrange the clocks
@@ -474,10 +500,14 @@ def output_clocks_to_db(star_id, dataset_id, clocks):
     cursor = conn.cursor()
     for row in clocks:
         query = f"""
-            INSERT INTO clock (star_id, dataset_id, angular_frequency, fourier_series_degree,
-                               theoretical_value)
-            VALUES ('{star_id}', '{dataset_id}', {row['angular_frequency']}, {row['fourier_series_degree']},
-                    {row['theoretical_value']});
+            INSERT INTO clock (star_id, dataset_id,
+                               angular_frequency, fourier_series_degree,
+                               theoretical_value, BIC,
+                               jackknife_value, jackknife_value_shuffled)
+            VALUES ('{star_id}', '{dataset_id}',
+                    {row['angular_frequency']}, {row['fourier_series_degree']},
+                    {row['theoretical_value']}, {row['BIC']},
+                    {row['jackknife_value']}, {row['jackknife_value_shuffled']});
         """
         cursor.execute(query)
     conn.commit()
