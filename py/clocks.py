@@ -207,7 +207,8 @@ def jackknife_value(resids, ivars, derivs, njack, shuffle_seed=None):
         loo = subsamp != samp
         time_shifts[samp] = np.sum(ivars[loo] * resids[loo] * derivs[loo]) \
                           / np.sum(ivars[loo] * derivs[loo] * derivs[loo])
-    return ((njack - 1) / njack) * np.sum((time_shifts - np.mean(time_shifts)) ** 2)
+    var = ((njack - 1) / njack) * np.sum((time_shifts - np.mean(time_shifts)) ** 2)
+    return 1. / var
 
 def clock_statistics(om, M, t, y, iv, njack=16):
     """
