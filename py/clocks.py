@@ -10,19 +10,20 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Copyright 2026 the authors. This code is licensed for re-use under the *MIT License*.
 
 ## bugs and issues and to-do items:
-- Needs a function "do KICID" that just clears the data on a single KICID and runs it.
 - Some nomenclature is bad about star vs light curve. KICID is a star, KICID + long is a light curve?
-- This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
+- This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn. There is some relevant code in `davidwhogg/ClockValue`
 - Ought to subtract some fiducial BJD for numerical stability.
-- Ought to store BIC values in the clock table in the db.
 
 ## notes:
 - This code doesn't even import matplotlib; plotting must be done elsewhere.
 
 ## calling sequence:
-- `python clocks.py db` #creates the database and fills the task table
-- `nohup python clocks.py worker > q.log 2>&1 &` #runs a worker in the background
+- `python clocks.py db` # creates the database and fills the task table
+- `python clocks.py cleanup` # resets `started` to NULL on failed tasks
+- `python clocks.py reset kicid` # deletes clocks for kicid and resets `started` to NULL
+- `nohup python clocks.py worker > q.log 2>&1 &` # runs a worker process in the background
 """
+
 from functools import partial
 from fractions import Fraction
 import numpy as np
@@ -43,6 +44,7 @@ import time
 import sqlite3 as db
 import os
 import sys
+import glob
 
 # set constants
 MAX_NUMBER_OF_STARS = 1_000 # for testing! raise this to 300_000 for production
@@ -53,8 +55,6 @@ MIN_THEORETICAL_VALUE = 1.e9 # inverse days squared
 MAX_INTRASTAR_VALUE_RATIO = 1.e3
 
 def get_kepler_data(kic_id, exptime='long', write_to_db=True):
-    
-    start = time.time()
     """
     ## Inputs:
     `kic_id`: Kepler ID (str)
@@ -70,31 +70,42 @@ def get_kepler_data(kic_id, exptime='long', write_to_db=True):
     - Way too much `try` / `except`.
     - Dependent on slightly unreliable lightkurve data caching; ought to clear cache on bad objects.
     """
-    print("clocks.get_kepler_data(): starting to download data for", kic_id)
+    start = time.time()
+    print("clocks.get_kepler_data(): obtaining data for", kic_id)
     try:
-        search_result = lk.search_lightcurve(kic_id, mission = 'Kepler', exptime=exptime)
-        if len(search_result) < 1:
-            msg = f"clocks.get_kepler_data: no results for {kic_id} at this cadence"
-            print(msg)
-            update_error_message(kic_id, 'Kepler_long', msg)
+        cache = lk.config.get_cache_dir()   # usually ~/.lightkurve/cache
+        kicno = kic_id[3:]
+        files = sorted(glob.glob(f"{cache}/mastDownload/Kepler/kplr{kicno}_lc_*/*_llc.fits"))
+        if len(files) < 10: # magic
+            print("clocks.get_kepler_data(): didn't find enough data in the cache, going to the web")
+            assert False
+        lc_collection = lk.LightCurveCollection([lk.read(f) for f in files])
+        print(f"clocks.get_kepler_data(): found data on {kic_id} in the cache")
+    except:
+        try:
+            search_result = lk.search_lightcurve(kic_id, mission = 'Kepler', exptime=exptime)
+            if len(search_result) < 1:
+                msg = f"clocks.get_kepler_data(): no results for {kic_id} at this cadence"
+                print(msg)
+                update_error_message(kic_id, 'Kepler_long', msg)
+                return None
+        except Exception as e:
+            print(f"Exception for {kic_id}: get_kepler_data(): lk.search_lightcurve() failed for {kic_id } with {str(e)}")
+            if write_to_db:
+                update_error_message(kic_id, 'Kepler_long', str(e))
             return None
-    except Exception as e:
-        print(f"Exception for {kic_id}: get_kepler_data(): lk.search_lightcurve() failed for {kic_id } with {str(e)}")
-        if write_to_db:
-            update_error_message(kic_id, 'Kepler_long', str(e))
-        return None
-    try:
-        lc_collection = search_result.download_all()
-    except lk.LightkurveError as e:
-        print(f"LightkurveError for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
-        if write_to_db:
-            update_error_message(kic_id, 'Kepler_long', str(e))
-        return None
-    except Exception as e:
-        print(f"Exception for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
-        if write_to_db:
-            update_error_message(kic_id, 'Kepler_long', str(e))
-        return None
+        try:
+            lc_collection = search_result.download_all()
+        except lk.LightkurveError as e:
+            print(f"LightkurveError for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
+            if write_to_db:
+                update_error_message(kic_id, 'Kepler_long', str(e))
+            return None
+        except Exception as e:
+            print(f"Exception for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
+            if write_to_db:
+                update_error_message(kic_id, 'Kepler_long', str(e))
+            return None
     try:
         lc = lc_collection.stitch()
         #print("get_kepler_data(): minimum time value", np.min(lc.time.value), np.min(lc.time), lc.time)
@@ -118,6 +129,7 @@ def get_kepler_data(kic_id, exptime='long', write_to_db=True):
         print(msg)
         if write_to_db:
             update_error_message(kic_id, 'Kepler_long', msg)
+            end_one_task(kic_id, 'Kepler_long')
         return None
 
     # reorder
@@ -378,13 +390,14 @@ def execute_query_and_close(query, retries = 5):
         conn.commit()
         cursor.close()
         conn.close()
+        # print(f"execute_query_and_close(): executed {query}")
     except db.OperationalError as e:
         if retries > 0:
             print(f"OperationalError encountered. Retrying... ({retries} attempts left)")
             time.sleep(1)  # Wait a bit before retrying
             execute_query_and_close(query, retries - 1)
         else:
-            print("Max retries reached. Could not execute query.")
+            print("execute_query_and_close(): Max retries reached. Could not execute query.")
             raise
 
 def load_star_table():
@@ -550,6 +563,16 @@ def restart_failed_tasks():
         """
     execute_query_and_close(query)
 
+def reset_one_star(star_id):
+    query = f"""
+        UPDATE task SET started = NULL WHERE star_id = '{star_id}';
+    """
+    execute_query_and_close(query)
+    query = f"""
+        DELETE FROM clock WHERE star_id = '{star_id}';
+    """
+    execute_query_and_close(query)
+
 def run_one_task():
     star_id, dataset_id = start_one_task()
     dataset_id = "Kepler_long"  #keep it lc for now
@@ -582,6 +605,11 @@ def main():
         print("clocks.main(): Restarted all dead tasks.") 
         return
 
+    if len(sys.argv) > 1 and sys.argv[1] == "reset":
+        reset_one_star(sys.argv[2])
+        print(f"clocks.main(): Reset star {sys.argv[2]}") 
+        return
+
     if len(sys.argv) > 1 and sys.argv[1] == "worker":
         time.sleep(5)
         while(True):
@@ -592,6 +620,7 @@ def main():
     print("Usage:")
     print("  python clocks.py db         # to setup an empty database (WARNING: CLOBBER)")
     print("  python clocks.py cleanup    # to restart failed tasks")
+    print("  python clocks.py reset star_id  # to restart one star")
     print("  python clocks.py worker     # to run as a worker process, doing available tasks")
     return
 
