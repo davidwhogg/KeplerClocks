@@ -90,32 +90,32 @@ def get_kepler_data(kic_id, exptime='long', write_to_db=True):
                 update_error_message(kic_id, 'Kepler_long', msg)
                 return None
         except Exception as e:
-            print(f"Exception for {kic_id}: get_kepler_data(): lk.search_lightcurve() failed for {kic_id } with {str(e)}")
+            print(f"clocks.get_kepler_data(): lk.search_lightcurve() failed for {kic_id} with {str(e)}")
             if write_to_db:
                 update_error_message(kic_id, 'Kepler_long', str(e))
             return None
         try:
             lc_collection = search_result.download_all()
         except lk.LightkurveError as e:
-            print(f"LightkurveError for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
+            print(f"clocks.get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
             if write_to_db:
                 update_error_message(kic_id, 'Kepler_long', str(e))
             return None
         except Exception as e:
-            print(f"Exception for {kic_id}: get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
+            print(f"clocks.get_kepler_data(): search_result.download_all() failed for {kic_id} with {str(e)}")
             if write_to_db:
                 update_error_message(kic_id, 'Kepler_long', str(e))
             return None
     try:
         lc = lc_collection.stitch()
-        #print("get_kepler_data(): minimum time value", np.min(lc.time.value), np.min(lc.time), lc.time)
+        #print("clocks.get_kepler_data(): minimum time value", np.min(lc.time.value), np.min(lc.time), lc.time)
     except lk.LightkurveError as e:
-        print(f"LightkurveError for {kic_id}: get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
+        print(f"clocks.get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
         if write_to_db:
             update_error_message(kic_id, 'Kepler_long', str(e))
         return None
     except Exception as e:
-        print(f"Exception for {kic_id}: get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
+        print(f"clocks.get_kepler_data(): lc_collection.stitch() failed for {kic_id} with {str(e)}")
         if write_to_db:
             update_error_message(kic_id, 'Kepler_long', str(e))
         return None
@@ -125,11 +125,10 @@ def get_kepler_data(kic_id, exptime='long', write_to_db=True):
     good = np.isfinite(times) & np.isfinite(fluxes) & np.isfinite(errors)
     times, fluxes, errors = times[good], fluxes[good], errors[good]
     if len(times) < MIN_NUMBER_OF_MEASUREMENTS:
-        msg = f"clocks.get_kepler_data: not enough data from Kepler on {kic_id} at this cadence"
+        msg = f"clocks.get_kepler_data(): not enough data from Kepler on {kic_id} at this cadence"
         print(msg)
         if write_to_db:
             update_error_message(kic_id, 'Kepler_long', msg)
-            end_one_task(kic_id, 'Kepler_long')
         return None
 
     # reorder
@@ -155,9 +154,9 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=32, nterms=8):
     - It is not clear that 32 is the right number of max peaks for default.
     - Should this code multiply by `fs ** 2` before peak-finding? To make it more like a value?
     - MAGIC oversampling by a factor of either 2 or 4 (I don't know which).
-    - MAGIC 0.2499 because when we made this larger, bad things happened.
+    - MAGIC 0.4999 because when we made this larger, bad things happened.
     """
-    fs = np.arange(1. / MAX_PERIOD, 0.2499 / dt, 0.25 * df)
+    fs = np.arange(1. / MAX_PERIOD, 0.4999 / dt, 0.25 * df)
     ps = LombScargle(ts, ys, errs, nterms=nterms).power(fs)
     idxs, _ = find_peaks(ps, distance=4)
     ii = np.argsort(ps[idxs])[::-1]
@@ -293,7 +292,7 @@ def identify_resonances(fs, fres, max_denominator=12):
                 frac_ij = Fraction(ratio_ij).limit_denominator(max_denominator)
                 test_ij = abs((ratio_ij - float(frac_ij)) / ratio_ij) < tol
                 duplicates[j] = test_ji | test_ij
-                print("identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
+                print("clocks.identify_resonances():", fs[i], fs[j], ratio_ji, frac_ji, ratio_ij, frac_ij, duplicates[j])
     return duplicates
 
 def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
@@ -390,14 +389,14 @@ def execute_query_and_close(query, retries = 5):
         conn.commit()
         cursor.close()
         conn.close()
-        # print(f"execute_query_and_close(): executed {query}")
+        # print(f"clocks.execute_query_and_close(): executed {query}")
     except db.OperationalError as e:
         if retries > 0:
-            print(f"OperationalError encountered. Retrying... ({retries} attempts left)")
+            print(f"clocks.execute_query_and_close(): OperationalError encountered. Retrying... ({retries} attempts left)")
             time.sleep(1)  # Wait a bit before retrying
             execute_query_and_close(query, retries - 1)
         else:
-            print("execute_query_and_close(): Max retries reached. Could not execute query.")
+            print("clocks.execute_query_and_close(): Max retries reached. Could not execute query.")
             raise
 
 def load_star_table():
@@ -451,7 +450,7 @@ def load_task_table(select_kics = None):
     count = cursor.fetchone()[0]
     cursor.close()
     conn.close()
-    print(f"Task table loaded with {count} entries.")
+    print(f"clocks.load_task_table(): Task table loaded with {count} entries.")
 
 def update_message(star_id, dataset_id, message):
     query = f"""UPDATE task  
@@ -533,8 +532,7 @@ def output_clocks_to_db(star_id, dataset_id, clocks):
     conn.close()
 
 def end_one_task(star_id, dataset_id):
-    ##change this for when there is an error message
-    #if error message is not null then do not set finished    
+    print(f"clocks.end_one_task(): declaring {star_id} {dataset_id} done; updating task database.")
     query = f"""UPDATE task SET 
     finished = "{Time(Time.now(), format = "isot")}" 
     WHERE star_id = "{star_id}" AND dataset_id = "{dataset_id}";"""
@@ -550,10 +548,9 @@ def restart_failed_tasks():
         SET finished = NULL,
         error_message = NULL,
         message = NULL
-        WHERE error_message IS NOT NULL; 
+        WHERE finished IS NOT NULL AND error_message IS NOT NULL; 
         """
     execute_query_and_close(query)
-
     query = f"""
         UPDATE task
         SET started = NULL,
@@ -582,7 +579,7 @@ def run_one_task():
         print(message)
         update_message(star_id, dataset_id, message)
     else:
-        message = f"clocks.run_one_task(): ---------> Found {len(clocks)} clocks in {star_id} with {(clocks['theoretical_value'])[0]:0.1e}"
+        message = f"clocks.run_one_task(): >>>> Found {len(clocks)} clocks in {star_id} with {(clocks['theoretical_value'])[0]:0.1e} <<<<"
         print(message)
         update_message(star_id, dataset_id, message)
         output_clocks_to_db(star_id, dataset_id, clocks)
