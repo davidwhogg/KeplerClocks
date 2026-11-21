@@ -10,7 +10,6 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Copyright 2026 the authors. This code is licensed for re-use under the *MIT License*.
 
 ## bugs and issues and to-do items:
-- There's a recursion depth bug such that the "refine" step should be in a try-except structure.
 - Needs a function "do KICID" that just clears the data on a single KICID and runs it.
 - Some nomenclature is bad about star vs light curve. KICID is a star, KICID + long is a light curve?
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
@@ -302,9 +301,12 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
     oms, chi_squareds = np.zeros_like(candidate_oms), np.zeros_like(candidate_oms)
     Ms = np.zeros_like(candidate_oms).astype(int)
     print(f"clocks.best_clocks_in_star(): refining clock frequencies for {kicid}")
+    # BUG: Should be a map
     for i, om0 in enumerate(candidate_oms):
-        # BUG: Should be a map
-        oms[i], Ms[i], chi_squareds[i] = get_best_clock(om0, Mmax, ts, ys, ivars, deltaf, deltat)
+        try:
+            oms[i], Ms[i], chi_squareds[i] = get_best_clock(om0, Mmax, ts, ys, ivars, deltaf, deltat)
+        except:
+            oms[i], Ms[i], chi_squareds[i] = om0, 1, np.inf
     if verbose:
         print("chi-squareds:", chi_squareds)
 
@@ -588,9 +590,9 @@ def main():
         return
 
     print("Usage:")
-    print("  python clocks.py db        # to setup an empty database (WARNING: CLOBBER)")
-    print("  python clocks.py cleanup   # to restart failed tasks")
-    print("  python clocks.py worker    # to run as a worker process")
+    print("  python clocks.py db         # to setup an empty database (WARNING: CLOBBER)")
+    print("  python clocks.py cleanup    # to restart failed tasks")
+    print("  python clocks.py worker     # to run as a worker process, doing available tasks")
     return
 
 if __name__ == "__main__":
