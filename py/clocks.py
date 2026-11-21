@@ -10,6 +10,7 @@ Functions for finding coherent clocks in NASA *Kepler* light curves.
 - Copyright 2026 the authors. This code is licensed for re-use under the *MIT License*.
 
 ## bugs and issues and to-do items:
+- There's a recursion depth bug such that the "refine" step should be in a try-except structure.
 - Needs a function "do KICID" that just clears the data on a single KICID and runs it.
 - Some nomenclature is bad about star vs light curve. KICID is a star, KICID + long is a light curve?
 - This code needs some Jupyter notebooks that can be used to test sub-parts. Development is bad rn.
