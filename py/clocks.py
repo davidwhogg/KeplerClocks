@@ -76,7 +76,7 @@ def get_kepler_data(kic_id, exptime='long', write_to_db=True):
         cache = lk.config.get_cache_dir()   # usually ~/.lightkurve/cache
         kicno = kic_id[3:]
         files = sorted(glob.glob(f"{cache}/mastDownload/Kepler/kplr{kicno}_lc_*/*_llc.fits"))
-        if len(files) < 10: # magic
+        if len(files) < 8: # magic
             print("clocks.get_kepler_data(): didn't find enough data in the cache, going to the web")
             assert False
         lc_collection = lk.LightCurveCollection([lk.read(f) for f in files])
