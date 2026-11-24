@@ -47,7 +47,7 @@ import sys
 import glob
 
 # set constants
-MAX_NUMBER_OF_STARS = 1_000 # for testing! raise this to 300_000 for production
+MAX_NUMBER_OF_STARS = 300_000 # big number
 MIN_NUMBER_OF_MEASUREMENTS = 10_000
 CLOCKS_DB_FILE = "../data/clocks.db"
 MAX_PERIOD = 30. # days
@@ -151,10 +151,12 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=16, nterms=8):
     
     ## bugs:
     - The `nterms` input is set without significant testing.
-    - It is not clear that the default `max_peaks` is the right default.
-    - MAGIC oversampling by a factor of either 2 or 4 (we don't know which).
-    - MAGIC 0.3333 because when we make this larger, bad things happen.
+    - It is not clear that max peaks default is good.
+    - Should this code multiply by `fs ** 2` before peak-finding? To make it more like a value?
+    - MAGIC oversampling by a factor of either 2 or 4 (I don't know which).
+    - MAGIC 0.3333 because when we made this larger, bad things happened.
     """
+    start1 = time.time() 
     fs = np.arange(1. / MAX_PERIOD, 0.3333 / dt, 0.25 * df)
     ps = LombScargle(ts, ys, errs, nterms=nterms).power(fs)
     idxs, _ = find_peaks(ps, distance=4)
@@ -162,6 +164,7 @@ def get_candidate_frequencies(ts, ys, errs, df, dt, max_peaks=16, nterms=8):
     idxs = idxs[ii]
     if len(idxs) > max_peaks:
         idxs = idxs[:max_peaks]
+    print("clocks.get_candidate_frequencies() took", time.time() - start1, "s")
     return fs[idxs]
 
 @partial(jax.jit, static_argnums=1)
@@ -256,6 +259,7 @@ def get_best_clock(om0, Mmax, t, y, iv, df, dt):
     # notes:
     - Recursion is insane and potentially a bug.
     """
+    start2 = time.time()
     nyquist = np.pi / dt # angular-frequency units
     M = max(1, min(Mmax - 1, int(nyquist // om0))) + 1 # hack minus 1, plus 1!
     do = 0.05 * np.pi * df # magic 0.05
@@ -265,6 +269,7 @@ def get_best_clock(om0, Mmax, t, y, iv, df, dt):
         return get_best_clock(oms[np.argmin(qs)], Mmax, t, y, iv, df, dt)
     foo = jnp.polyfit(oms, qs, 2)
     om = jnp.roots(jnp.polyder(foo), strip_zeros=False).real
+    print("clocks.get_best_cloc() took", time.time() - start2, "s")
     return om[0], M, jnp.polyval(foo, om)[0]
 
 def identify_resonances(fs, fres, max_denominator=12):
@@ -295,6 +300,7 @@ def identify_resonances(fs, fres, max_denominator=12):
     return duplicates
 
 def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
+    start_total = time.time()
     print(f"clocks.best_clocks_in_star(): getting Kepler data for {kicid}")
     foo = get_kepler_data(kicid, write_to_db=write_to_db)
     if foo is None:
@@ -343,6 +349,7 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
     good = (clocks['theoretical_value'] > MIN_THEORETICAL_VALUE) \
          & (clocks['theoretical_value'] > (np.max(clocks['theoretical_value']) / MAX_INTRASTAR_VALUE_RATIO))
     if np.sum(good) < 1:
+        print(f"TOTAL TIME: clocks.best_clocks_in_star() for {kicid} took {time.time() - start_total} s and no clocks")
         return None
     clocks = clocks[good]
     if verbose:
@@ -357,8 +364,10 @@ def best_clocks_in_star(kicid, Mmax=128, verbose=False, write_to_db=True):
         print(clocks)
     good = (clocks['angular_frequency'] < (0.9999 * np.pi / deltat)) # magic nyquist?
     if np.sum(good) < 1:
+        print(f"TOTAL TIME: clocks.best_clocks_in_star() for {kicid} took, {time.time() - start_total} s  and no clocks")
         return None
     clocks = clocks[good]
+    print(f"TOTAL TIME:clocks.best_clocks_in_star() for {kicid} took, {time.time() - start_total} s")
     if verbose:
         print(clocks)
     return clocks
@@ -540,14 +549,18 @@ def end_one_task(star_id, dataset_id):
 def restart_failed_tasks():
     """
     ##Bugs: 
-    - The error_message query is way too universal
+    - The error_message query is way too specific.
+    - The first query should probably only kill tasks started awhile ago.
     """
     query = f"""
         UPDATE task
         SET finished = NULL,
+	started = NULL,
         error_message = NULL,
         message = NULL
-        WHERE finished IS NOT NULL AND error_message IS NOT NULL; 
+        WHERE error_message LIKE 'Timeout limit%'
+	OR error_message LIKE 'Request failed%'
+	OR error_message LIKE '[Errno%'; 
         """
     execute_query_and_close(query)
     query = f"""
@@ -569,8 +582,9 @@ def reset_one_star(star_id):
     """
     execute_query_and_close(query)
 
-def run_one_task():
-    star_id, dataset_id = start_one_task()
+def run_one_task(star_id = None, dataset_id = None):
+    if star_id is None:
+         star_id, dataset_id = start_one_task()
     dataset_id = "Kepler_long"  #keep it lc for now
     clocks = best_clocks_in_star(star_id)
     if clocks is None:
@@ -583,6 +597,51 @@ def run_one_task():
         update_message(star_id, dataset_id, message)
         output_clocks_to_db(star_id, dataset_id, clocks)
     end_one_task(star_id, dataset_id)
+
+def run_one_kic(kicid, dataset_id="Kepler_long"):
+    star_id = f"KIC{int(str(kicid).upper().replace('KIC', '')):09d}"   
+
+    conn = get_db_connection()
+    cursor = conn.cursor()
+    cursor.execute(f"""SELECT finished FROM task
+        WHERE star_id = "{star_id}" AND dataset_id = "{dataset_id}";""")
+    finished = cursor.fetchone()[0]
+    cursor.close()
+    conn.close()
+
+    if finished is not None:
+        print(f"clocks.run_one_kic(): rerunning {star_id}")
+        query = f"""DELETE FROM clock
+        WHERE star_id = "{star_id}" AND dataset_id = "{dataset_id}";"""
+        execute_query_and_close(query)
+
+    query = f"""UPDATE task SET
+    code_version = NULL,
+    finished = NULL,
+    message = NULL,
+    error_message = NULL,
+    started = "{Time(Time.now(), format = "isot")}",
+    process_id = {os.getpid()}
+    WHERE star_id = "{star_id}" AND dataset_id = "{dataset_id}";"""
+    execute_query_and_close(query)
+
+    run_one_task(star_id, dataset_id)
+
+def reset_best_clock_tasks():
+    # order matters: best_clock is built from the clock table, so reset the tasks first
+    query = """UPDATE task SET
+    started = NULL,
+    process_id = NULL,
+    finished = NULL,
+    message = NULL,
+    error_message = NULL,
+    code_version = NULL
+    WHERE star_id IN (SELECT star_id FROM best_clock);"""
+    execute_query_and_close(query)
+
+    query = """DELETE FROM clock
+    WHERE star_id IN (SELECT star_id FROM best_clock);"""
+    execute_query_and_close(query)
 
 def main():
     """ this is wrong"""
@@ -612,12 +671,21 @@ def main():
             run_one_task()
             sys.stdout.flush()
         return
+    if len(sys.argv) > 2 and sys.argv[1] == "star":
+        run_one_kic(sys.argv[2])
+        return
+    if len(sys.argv) > 1 and sys.argv[1] == "reset_best_clocks":
+        reset_best_clock_tasks()
+        print("clocks.main(): Reset tasks and deleted clocks for every star in best_clock.")
+        return
 
     print("Usage:")
-    print("  python clocks.py db         # to setup an empty database (WARNING: CLOBBER)")
-    print("  python clocks.py cleanup    # to restart failed tasks")
-    print("  python clocks.py reset star_id  # to restart one star")
-    print("  python clocks.py worker     # to run as a worker process, doing available tasks")
+    print("  python clocks.py db        # to setup an empty database (WARNING: CLOBBER)")
+    print("  python clocks.py cleanup   # to restart failed tasks")
+    print("  python clocks.py worker    # to run as a worker process")
+    print("  python clocks.py star KIC009027328   # to reset and rerun one star")
+    print("  python clocks.py reset star_id  # to reset one star (but not rerun it)" 
+    print("  python clocks.py reset_best_clocks   # to rerun the stars in best_clock")
     return
 
 if __name__ == "__main__":
