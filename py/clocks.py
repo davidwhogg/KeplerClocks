@@ -684,7 +684,7 @@ def main():
     print("  python clocks.py cleanup   # to restart failed tasks")
     print("  python clocks.py worker    # to run as a worker process")
     print("  python clocks.py star KIC009027328   # to reset and rerun one star")
-    print("  python clocks.py reset star_id  # to reset one star (but not rerun it)" 
+    print("  python clocks.py reset star_id  # to reset one star (but not rerun it)")
     print("  python clocks.py reset_best_clocks   # to rerun the stars in best_clock")
     return
 
